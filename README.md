@@ -1252,17 +1252,7 @@ void MyRTC_ReadTime(void)
 }
 ```
 
-配置完之后编译一下，我发现一个奇妙的事情就是PC13变成常亮了！
 
-这应该是引脚冲突了，直接看看CUBEMX的图形配置界面，果不其然PC13是RTC的输出引脚
-
-![image-20260226223433507](D:/FreeRTOS-Watch/README.assets/image-20260226223433507.png)
-
-奥，这个时候我才注意到上面基础配置是可以选择不作为RTC输出的
-
-![image-20260226223751823](D:/FreeRTOS-Watch/README.assets/image-20260226223751823.png)
-
-重新生成一下工程，运行代码可以发现一切正常了
 
 ## ⚙️ 任务封装（APP文件夹）
 
