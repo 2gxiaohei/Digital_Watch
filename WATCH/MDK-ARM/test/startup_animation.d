@@ -1,0 +1,17 @@
+test\startup_animation.o: ..\APP\startup_animation.c
+test\startup_animation.o: ..\APP\startup_animation.h
+test\startup_animation.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdint.h
+test\startup_animation.o: ../FreeRTOS/include/FreeRTOS.h
+test\startup_animation.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stddef.h
+test\startup_animation.o: ../Core/Inc/FreeRTOSConfig.h
+test\startup_animation.o: ../FreeRTOS/include/projdefs.h
+test\startup_animation.o: ../FreeRTOS/include/portable.h
+test\startup_animation.o: ../FreeRTOS/include/deprecated_definitions.h
+test\startup_animation.o: ../FreeRTOS/portable/RVDS/ARM_CM3/portmacro.h
+test\startup_animation.o: ../FreeRTOS/include/mpu_wrappers.h
+test\startup_animation.o: ../FreeRTOS/include/task.h
+test\startup_animation.o: ../FreeRTOS/include/list.h
+test\startup_animation.o: ../HardWare/oled.h
+test\startup_animation.o: ../HardWare/oled_fonts.h
+test\startup_animation.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\string.h
+test\startup_animation.o: C:\Keil_v5\ARM\ARMCC\Bin\..\include\stdio.h
