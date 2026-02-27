@@ -25,8 +25,11 @@ test\main.o: ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_cortex.h
 test\main.o: ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_flash.h
 test\main.o: ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_flash_ex.h
 test\main.o: ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_pwr.h
+test\main.o: ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_rtc.h
+test\main.o: ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_rtc_ex.h
 test\main.o: ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_tim.h
 test\main.o: ../Drivers/STM32F1xx_HAL_Driver/Inc/stm32f1xx_hal_tim_ex.h
+test\main.o: ../Core/Inc/rtc.h
 test\main.o: ../Core/Inc/gpio.h
 test\main.o: ../FreeRTOS/include/FreeRTOS.h
 test\main.o: ../Core/Inc/FreeRTOSConfig.h
@@ -39,3 +42,4 @@ test\main.o: ../FreeRTOS/include/task.h
 test\main.o: ../FreeRTOS/include/list.h
 test\main.o: ../APP/startup_animation.h
 test\main.o: ../HardWare/oled.h
+test\main.o: ../APP/Clock.h

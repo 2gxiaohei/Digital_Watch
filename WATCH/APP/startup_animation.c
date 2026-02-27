@@ -23,7 +23,7 @@ void vTaskStartupAnimation(void *pvParameters)
     vAnimation_Typewriter();
     
     // 2. 加载进度条动画
-    vAnimation_LoadingBar();
+    //vAnimation_LoadingBar();
     
     // 设置完成标志
     xAnimationCompleted = pdTRUE;

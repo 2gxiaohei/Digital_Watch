@@ -1,4 +1,4 @@
-# 【项目日记（更新ing）】基于FreeRTOS的智能手表项目(STM32C6T6/C8T6+HAL库)
+【项目日记（更新ing）】基于FreeRTOS的智能手表项目(STM32C6T6/C8T6+HAL库)
 
 ## 📝 前言
 
@@ -932,6 +932,338 @@ void OLED_Init(void)
 //各种屏幕操作函数实现详见OLED.C
 ```
 
+#### RTC时钟
+
+之前笔者是用外挂DS1302芯片来做的时钟功能，但STM32微控制器内部其实已经集成了RTC（Real-Time Clock）外设。智能手表对功耗和体积的严格要求，利用VBAT引脚接备用电池保证主电源掉电时持续计时，配合外部32.768kHz晶振（LSE）确保精度，再结合FreeRTOS的Tickless模式实现深度睡眠下的定时唤醒，这样既能精简硬件、降低成本，又能利用RTC闹钟实现定时提醒等智能功能，更符合智能手表的量产思维。
+
+代码还是从江协科技32标准库教程移植过来，参考12-2RTC实时时钟示例程序。
+
+##### CUBEMX配置
+
+首先打开STM32F103的数据手册，可以看到，在STM32的时钟树结构中，RTC（实时时钟）模块的时钟源RTCCLK可通过三条路径获取：LSE（低速外部晶振）、LSI（低速内部RC振荡器）以及HSE（高速外部时钟）的分频输出。其中，LSE采用32.768 kHz的外部晶振具有独特的工程优势：该频率经过15次二分频后恰好可获得精准的1Hz秒信号，且晶振本身具有极低的功耗特性。更为关键的是，在电源管理架构中，LSE所在的低速时钟域与VBAT备用电源域直接相连——当主电源VDD掉电时，VBAT引脚连接的纽扣电池或超级电容能够无缝接管LSE振荡器及RTC寄存器的供电，确保实时时钟在系统休眠或断电状态下仍能持续运行并保持时间数据不丢失。相比之下，LSI虽然无需外部器件，但其精度受温度影响较大且无法由备用电池供电；HSE路径则因依赖于主电源供电的主振荡器，在掉电后完全失效。因此，从工程可靠性角度出发，选择LSE作为RTC时钟源是实现主备电源无缝切换、保障低功耗模式下时钟持续运行的唯一合理方案。
+
+![image-20260227182006254](README.assets/image-20260227182006254.png)
+
+所以我们要在CUBEMX里面启用LSE
+
+![image-20260227182026906](README.assets/image-20260227182026906.png)
+
+然后来到RTC配置界面，特别注意：
+
+**RTC输出引脚默认与板载LED的PC13复用**，如果在RTC配置界面不需要使用输出功能，千万不要选择"Disable"，而是必须选择"NO RTC OUTPUT"。因为选择"Disable"实际上并没有真正禁用RTC输出，反而会强制要求你在下方的三种输出模式中选择一种，这样RTC就会持续占用PC13引脚输出时钟信号，导致原本应该由代码控制的板载LED不受控制地变成常亮状态（笔者实践的血泪都是哈哈，这个Disable太有迷惑性了）；只有选择"NO RTC OUTPUT"，才能真正释放PC13引脚的控制权，让LED可以按照预期正常闪烁。
+
+```
+☑ Activate Clock Source    （勾选 - 使能RTC时钟）
+☑ Activate Calendar        （勾选 - 使能日历功能）
+RTC OUT → NO RTC OUTPUT     （释放RTC输出引脚为普通GPIO引脚）
+Tamper → Disable           （禁用入侵检测）
+```
+
+下面日历时间配置这里，对于日期格式（Data Format），两种格式都可，Binary数值直接以二进制形式存储,而BCD每个十进制位用4位二进制表示
+
+```
+例子：15点58分
+Binary：Hours  = 15  → 二进制：0000 1111
+        Minutes= 58  → 二进制：0011 1010
+BCD:    Hours  = 15  → 高4位=1，低4位=5 → 二进制：0001 0101
+        Minutes= 58  → 高4位=5，低4位=8 → 二进制：0101 1000
+```
+
+选择不同的日期格式后续代码写的会不大一样，举例说
+
+```
+Binary方式：
+sTime.Hours = 15;     // 直接赋值为15
+sTime.Minutes = 58;   // 直接赋值为58
+BCD方式：
+sTime.Hours = 0x15;   // 需要写成0x15，实际代表15点
+sTime.Minutes = 0x58; // 需要写成0x58，实际代表58分
+```
+
+按照江协代码的写法那就是Binary方式。
+
+然后其他的年月日包括后面的日期配置的初始值都不用在这里设置，这些我们留到代码去写HAL库自带的时间结构体就好。
+
+生成的代码中可以看到CUBEMX自动帮我们生成了时间相关的结构体
+
+![image-20260227182452652](README.assets/image-20260227182452652.png)
+
+后续我们可以在自动生成的rtc.c中找到设置初始时间的代码片段
+
+![image-20260227182806258](README.assets/image-20260227182806258.png)
+
+![image-20260227182854943](README.assets/image-20260227182854943.png)
+
+CUBEMX会默认把我们在Calendar Time/Date里面设置的初始时间放到这里，我们只需要修改代码就可以覆盖原先的设置
+
+![image-20260227182932562](README.assets/image-20260227182932562.png)
+
+通用配置General这里
+
+```
+Auto Predivider Calculation
+
+要不要自动计算分频？ → 选 Enabled（开启）
+
+Asynchronous Predivider value
+
+怎么计算分频？ → 选 Automatic（自动）
+```
+
+这样CUBEMX就自动帮我们把分频配好了，相当于原来我们手动配置预分配器这一步
+
+```
+//配置预分配器
+RTC_SetPrescaler(32768-1);
+RTC_WaitForLastTask();//等待写入操作完成
+```
+
+最后别忘记去时钟树把通向RTC的时钟源改为LSE，原因上面已经说过了，三个时钟源只有LSE所在的低速时钟域与VBAT备用电源域直接相连，也就是主电源掉电后继续走时。笔者先前忘记改这个地方就导致一掉电时间就清零了。
+
+![image-20260227183138786](README.assets/image-20260227183138786.png)
+
+##### RTC驱动文件
+
+还是基于江协的源码修改
+
+修改CUBEMX帮我们生成的rtc.c中的初始化函数（其实一开始我是想把初始化在我自己的驱动文件myrtc.c里面写的，但是发现断电后时间没有被正确保存。结果发现是CUBEMX自动帮我们生成的初始化代码自带了重置时间为默认值的功能，所以为了时间不受到掉电重新上电的影响我们需要直接修改逻辑。
+
+代码首先读取指定的后备寄存器（RTC_BKP_DR1）中的标志值（0xA5A5），以此判断RTC是否为首次上电运行。若读取值不匹配，则说明是首次启动或后备域丢失，此时会执行完整的初始化流程：设置用户指定的初始时间（2026年2月26日21:32:00）、开启秒中断，并将时间日期以及标志位（0xA5A5）写入后备寄存器中保存。若读取值匹配，则说明RTC已在运行且上次关机时保存了时间参数，代码会直接从后备寄存器中读出之前保存的日期数据，并重新设置到RTC（主要是为了恢复日期相关的寄存器状态），同时再次开启秒中断。这样就确保了每次上电时，RTC不会因CubeMX默认代码而重置为编译时的默认值，而是根据后备寄存器的标志状态，要么执行一次性的初始化，要么恢复之前保存的配置，从而实现了断电后时间的持续保持功能。
+
+###### 修改rtc.c文件
+
+我原先是在我自己创建的myrtc.c文件里写的初始化函数，结果发现复位后时间被设置到0：0：0了，我仔细检查了配置和代码，最后发现是CUBEMX自动生成的初始化函数里面会无判断的自动设置时间为默认值。
+
+![image-20260227183737712](README.assets/image-20260227183737712.png)
+
+至于解决方法在江协教程中已经讲解过了，那就是在第一次上电的时候去写备份寄存器，后续每次上电都去判断这个寄存器的值，如果设置过值就不执行赋值时间为初试设置值的代码了。
+
+```
+思路上：
+if(备份寄存器的值不为A5A5){
+   //第一次会走这里
+   赋值时间结构体各个值为设置的初始时间
+   写备份寄存器为A5A5
+}
+//之后主电源掉电再上电就走这里了
+```
+
+###### rtc.c修改
+
+主要就是实现上面这个逻辑，然后对应的后备区时钟开启等操作也要进行一下，这个和江协的初始化函数逻辑是差不多的
+
+```
+/* RTC init function */
+void MX_RTC_Init(void)
+{
+
+  /* USER CODE BEGIN RTC_Init 0 */
+  RTC_TimeTypeDef time;   // 时间结构体参数
+  RTC_DateTypeDef datebuff;   // 日期结构体参数
+  /* USER CODE END RTC_Init 0 */
+
+  RTC_TimeTypeDef sTime = {0};
+  RTC_DateTypeDef DateToUpdate = {0};
+
+  /* USER CODE BEGIN RTC_Init 1 */
+  __HAL_RCC_BKP_CLK_ENABLE();       // 开启后备区域时钟
+  __HAL_RCC_PWR_CLK_ENABLE();       // 开启电源时钟
+  /* USER CODE END RTC_Init 1 */
+
+  /** Initialize RTC Only
+  */
+  hrtc.Instance = RTC;
+  hrtc.Init.AsynchPrediv = RTC_AUTO_1_SECOND;
+  if (HAL_RTC_Init(&hrtc) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /* USER CODE BEGIN Check_RTC_BKUP */
+  // 检查备份寄存器，判断是否为首次上电
+  if (HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR1) != 0xA5A5)
+  {
+    /* USER CODE END Check_RTC_BKUP */
+
+    /** Initialize RTC and set the Time and Date
+    */
+    // 首次上电，设置初始时间
+    sTime.Hours = 21;       // 21点
+    sTime.Minutes = 32;     // 32分
+    sTime.Seconds = 0;      // 0秒
+
+    if (HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BIN) != HAL_OK)
+    {
+      Error_Handler();
+    }
+    
+    DateToUpdate.WeekDay = 4;    // 星期四 (通常1=星期一, 2=星期二, 3=星期三, 4=星期四)
+    DateToUpdate.Month = 2;       // 二月
+    DateToUpdate.Date = 26;       // 26日
+    DateToUpdate.Year = 26;       // 2026年 (表示年份的后两位)
+
+    if (HAL_RTC_SetDate(&hrtc, &DateToUpdate, RTC_FORMAT_BIN) != HAL_OK)
+    {
+      Error_Handler();
+    }
+    
+    /* USER CODE BEGIN RTC_Init 2 */
+    // 开启RTC时钟秒中断
+    __HAL_RTC_SECOND_ENABLE_IT(&hrtc, RTC_IT_SEC);
+    
+    // 保存日期数据到备份寄存器
+    datebuff = DateToUpdate;  // 把日期数据拷贝到自己定义的data中
+    
+    // 向后备区域寄存器写入数据，标记已初始化
+    HAL_RTCEx_BKUPWrite(&hrtc, RTC_BKP_DR1, 0xA5A5);
+    HAL_RTCEx_BKUPWrite(&hrtc, RTC_BKP_DR2, (uint16_t)datebuff.Year);
+    HAL_RTCEx_BKUPWrite(&hrtc, RTC_BKP_DR3, (uint16_t)datebuff.Month);
+    HAL_RTCEx_BKUPWrite(&hrtc, RTC_BKP_DR4, (uint16_t)datebuff.Date);
+    HAL_RTCEx_BKUPWrite(&hrtc, RTC_BKP_DR5, (uint16_t)datebuff.WeekDay);
+    /* USER CODE END RTC_Init 2 */
+  }
+  else
+  {
+    /* USER CODE BEGIN RTC_Init 2 */
+    // 非首次上电，从备份寄存器读取之前保存的日期数据
+    datebuff.Year    = HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR2);
+    datebuff.Month   = HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR3);
+    datebuff.Date    = HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR4);
+    datebuff.WeekDay = HAL_RTCEx_BKUPRead(&hrtc, RTC_BKP_DR5);
+    
+    // 恢复日期设置
+    DateToUpdate = datebuff;
+    if (HAL_RTC_SetDate(&hrtc, &DateToUpdate, RTC_FORMAT_BIN) != HAL_OK)
+    {
+      Error_Handler();
+    }
+    
+    // 开启RTC时钟秒中断
+    __HAL_RTC_SECOND_ENABLE_IT(&hrtc, RTC_IT_SEC);
+    /* USER CODE END RTC_Init 2 */
+  }
+  
+/* USER CODE BEGIN RTC_Init 2 */
+	
+/* USER CODE END RTC_Init 2 */
+}
+```
+
+然后就是我们自己的驱动文件，rtc初始化代码在rtc.c里面已经实现过了，我们自己的驱动文件就写一下设置时间和读取时间的代码就好。
+
+这里的实现逻辑就是读写时间结构体然后通过HAL_RTC_SetTime（） 、HAL_RTC_SetDate（）、HAL_RTC_GetTime（）、HAL_RTC_GetDate()去把结构体往RTC硬件寄存器读或写。
+
+###### myrtc.h
+
+```
+#ifndef __MYRTC_H
+#define __MYRTC_H
+
+#include "stm32f1xx_hal.h"  // 修改标准库→HAL库头文件
+
+extern uint16_t MyRTC_Time[];//年月日时分秒
+
+void MyRTC_SetTime(void);
+void MyRTC_ReadTime(void);
+
+#endif
+```
+
+###### myrtc.c
+
+```
+#include "myrtc.h"      
+#include <time.h>
+
+extern RTC_HandleTypeDef hrtc;  // 添加CubeMX生成的RTC句柄
+uint16_t MyRTC_Time[6];
+
+//初始化代码在CUBEMX生成的rtc.c文件的MX_RTC_Init()函数中
+
+void MyRTC_SetTime(void)
+{
+    time_t time_cnt;
+    struct tm time_date;
+    RTC_TimeTypeDef sTime = {0};   // HAL库时间结构体，用于设置时分秒
+    RTC_DateTypeDef sDate = {0};   // HAL库日期结构体，用于设置年月日
+    
+    // 从MyRTC_Time数组获取时间数据
+    time_date.tm_year = MyRTC_Time[0]-1900;
+    time_date.tm_mon = MyRTC_Time[1]-1;
+    time_date.tm_mday = MyRTC_Time[2];
+    time_date.tm_hour = MyRTC_Time[3];
+    time_date.tm_min = MyRTC_Time[4];
+    time_date.tm_sec = MyRTC_Time[5];
+    
+    // 转换为时间戳
+    time_cnt = mktime(&time_date);
+    
+    // 将UTC时间戳转换回tm结构体
+    time_date = *localtime(&time_cnt);
+    
+    // 填充HAL库时间结构体
+    sTime.Hours = time_date.tm_hour;
+    sTime.Minutes = time_date.tm_min;
+    sTime.Seconds = time_date.tm_sec;
+    
+    // 填充HAL库日期结构体（HAL年份=tm_year-100，因为HAL以2000年为基准）
+    sDate.Year = time_date.tm_year - 100;
+    sDate.Month = time_date.tm_mon + 1;
+    sDate.Date = time_date.tm_mday;
+    
+    // HAL库函数：设置RTC时间和日期（Binary格式，与CubeMX配置一致）
+    HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BIN);
+    HAL_RTC_SetDate(&hrtc, &sDate, RTC_FORMAT_BIN);
+    
+    // 删除：HAL库函数内部已包含等待操作完成的机制
+    // RTC_WaitForLastTask();
+}
+
+void MyRTC_ReadTime(void)
+{
+    time_t time_cnt;
+    struct tm time_date;
+    RTC_TimeTypeDef sTime = {0};   // HAL库时间结构体，用于接收时分秒
+    RTC_DateTypeDef sDate = {0};   // HAL库日期结构体，用于接收年月日
+    
+    // HAL库函数：从RTC读取时间和日期（Binary格式）
+    HAL_RTC_GetTime(&hrtc, &sTime, RTC_FORMAT_BIN);
+    HAL_RTC_GetDate(&hrtc, &sDate, RTC_FORMAT_BIN);
+    
+    // 将HAL库结构体转换为tm结构体
+    time_date.tm_year = sDate.Year + 100;  // HAL年份+100 = tm_year
+    time_date.tm_mon = sDate.Month - 1;
+    time_date.tm_mday = sDate.Date;
+    time_date.tm_hour = sTime.Hours;
+    time_date.tm_min = sTime.Minutes;
+    time_date.tm_sec = sTime.Seconds;
+    
+    // 转换为时间戳
+    time_cnt = mktime(&time_date);
+    time_date = *localtime(&time_cnt);
+    
+    // 更新MyRTC_Time数组供应用程序使用
+    MyRTC_Time[0] = time_date.tm_year + 1900;
+    MyRTC_Time[1] = time_date.tm_mon + 1;
+    MyRTC_Time[2] = time_date.tm_mday;
+    MyRTC_Time[3] = time_date.tm_hour;
+    MyRTC_Time[4] = time_date.tm_min;
+    MyRTC_Time[5] = time_date.tm_sec;
+}
+```
+
+配置完之后编译一下，我发现一个奇妙的事情就是PC13变成常亮了！
+
+这应该是引脚冲突了，直接看看CUBEMX的图形配置界面，果不其然PC13是RTC的输出引脚
+
+![image-20260226223433507](D:/FreeRTOS-Watch/README.assets/image-20260226223433507.png)
+
+奥，这个时候我才注意到上面基础配置是可以选择不作为RTC输出的
+
+![image-20260226223751823](D:/FreeRTOS-Watch/README.assets/image-20260226223751823.png)
+
+重新生成一下工程，运行代码可以发现一切正常了
+
 ## ⚙️ 任务封装（APP文件夹）
 
 #### UI界面-启动动画
@@ -1230,4 +1562,204 @@ void vLEDTask(void *pvParameters)
 ```
 
 ---
+
+#### UI界面-简单时钟显示
+
+把上面的rtc驱动文件和OLED显示文件整合成一个简单的时间显示界面
+
+###### Clock.h
+
+```
+#ifndef __CLOCK_H
+#define __CLOCK_H
+
+/* 包含头文件 */
+#include "FreeRTOS.h"
+#include "task.h"
+
+//任务句柄声明
+extern TaskHandle_t RTC_Display_Handle;
+
+/* 任务函数声明 */
+void Task_RTC_Display(void *argument);
+
+/* 任务创建函数声明 */
+void Clock_Task_Init(void);
+
+#endif /* __CLOCK_H */
+```
+
+###### Clock.c
+
+```
+#include "Clock.h"
+#include "myrtc.h"    
+#include "oled.h"
+
+/* 定义任务句柄 */
+TaskHandle_t RTC_Display_Handle = NULL;
+
+//动画完成标志的外部引用(用于同步）
+extern volatile uint8_t xAnimationCompleted;
+
+//RTC显示任务函数
+void Task_RTC_Display(void *argument)
+{
+    /* 等待开机动画完成 */
+    while (xAnimationCompleted == pdFALSE)
+    {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    
+    /* 无限循环 - 显示时间 */
+    while (1)
+    {
+        // 读取当前RTC时间
+        MyRTC_ReadTime();
+        
+        // 清屏
+        OLED_Clear();
+        
+        // 第1行 (Y=1) - 显示年月日
+        OLED_ShowString(1, 1, "Date:", 8);                    // 列1: "Date:"
+        OLED_ShowNum(1 + 6 * 8, 1, MyRTC_Time[0], 4, 8);      // 列49: 年
+        OLED_ShowString(1 + 10 * 8, 1, "-", 8);               // 列81: "-"
+        OLED_ShowNum(1 + 11 * 8, 1, MyRTC_Time[1], 2, 8);     // 列89: 月
+        OLED_ShowString(1 + 13 * 8, 1, "-", 8);               // 列105: "-"
+        OLED_ShowNum(1 + 14 * 8, 1, MyRTC_Time[2], 2, 8);     // 列113: 日
+        
+        // 第2行 (Y=1+16=17) - 显示时分秒
+        OLED_ShowString(1, 17, "Time:", 8);                   // 列1: "Time:"
+        OLED_ShowNum(1 + 6 * 8, 17, MyRTC_Time[3], 2, 8);     // 列49: 时
+        OLED_ShowString(1 + 8 * 8, 17, ":", 8);               // 列65: ":"
+        OLED_ShowNum(1 + 9 * 8, 17, MyRTC_Time[4], 2, 8);     // 列73: 分
+        OLED_ShowString(1 + 11 * 8, 17, ":", 8);              // 列89: ":"
+        OLED_ShowNum(1 + 12 * 8, 17, MyRTC_Time[5], 2, 8);    // 列97: 秒
+        
+        // 更新OLED显示
+        OLED_Update();
+        
+        // 延时1秒
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+//时钟任务初始化函数
+void Clock_Task_Init(void)
+{
+    /* 创建RTC显示任务 */
+    xTaskCreate(
+        Task_RTC_Display,       // 任务函数
+        "RTC_Display",          // 任务名称
+        256,                    // 任务堆栈大小（根据实际需求调整）
+        NULL,                   // 任务参数
+        1,                      // 任务优先级（与LED相同）
+        &RTC_Display_Handle     // 任务句柄
+    );
+}
+```
+
+###### 任务测试3
+
+###### FreeRTOSConfig.h
+
+保持移植测试程序的文件内容即可
+
+###### main.c
+
+添加头文件，添加任务即可
+
+```
+/* USER CODE BEGIN Includes */
+#include "FreeRTOS.h"
+#include "startup_animation.h"
+#include "oled.h"
+#include "Clock.h"
+/* USER CODE END Includes */
+
+/* USER CODE BEGIN PV */
+TaskHandle_t xLEDTaskHandle = NULL;
+/* USER CODE END PV */
+
+/* USER CODE BEGIN PFP */
+void vLEDTask(void *pvParameters);
+/* USER CODE END PFP */
+
+  /* USER CODE BEGIN 2 */
+ // 初始化OLED
+    OLED_Init();
+    OLED_Clear();
+    
+    // 创建开机动画任务（高优先级，让动画先运行）
+    if (xCreateStartupAnimationTask(2) != pdPASS)
+    {
+        // 创建失败处理
+        OLED_ShowString(0, 0, "Anim Fail!", 8);
+        OLED_Update();
+    }
+    
+    // 创建LED闪烁任务（低优先级）
+    xTaskCreate(
+        vLEDTask,
+        "LED",
+        128,
+        NULL,
+        1,
+        &xLEDTaskHandle
+    );
+		//创建时钟显示任务
+    Clock_Task_Init();
+    // 启动调度器
+    vTaskStartScheduler();
+  /* USER CODE END 2 */
+  
+  /* USER CODE BEGIN 4 */
+//LED闪烁任务
+void vLEDTask(void *pvParameters)
+{
+    // 等待动画完成
+    while (xAnimationCompleted == pdFALSE)
+    {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    while (1)
+    {
+        HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+}
+/* USER CODE END 4 */
+```
+
+###### 任务间问题
+
+预期现象是播放动画然后显示时钟界面的同时小灯闪烁，但是我发现程序会卡在进度条这个动画，去掉进度条一切符合预期
+
+```
+//加载进度条动画
+
+void vAnimation_LoadingBar(void)
+{
+//…… 
+    // 进度条动画
+    for (progress = 0; progress <= 100; progress += 5)
+    {
+        // 显示百分比
+        sprintf(percent, "%d%%", progress);
+        percentX = (128 - (strlen(percent) * 8)) / 2;
+        OLED_ShowString(percentX, 50, percent, 8);
+        
+        // 绘制进度
+        if (progress > 0)
+        {
+            OLED_FillArea(26, 38, (76 * progress) / 100, 6, 1);
+        }
+        
+        OLED_Update();
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    
+//……
+}
+```
 
