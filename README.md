@@ -1,4 +1,4 @@
-【项目日记（更新ing）】基于FreeRTOS的智能手表项目(STM32C6T6/C8T6+HAL库)
+# 【项目日记（更新ing）】基于FreeRTOS的智能手表项目(STM32C6T6/C8T6+HAL库)
 
 ## 📝 前言
 
