@@ -24,6 +24,8 @@
 /* USER CODE BEGIN Includes */
 #include "FreeRTOS.h"
 #include "task.h"
+#include "stm32f1xx_hal.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/

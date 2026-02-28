@@ -1258,7 +1258,7 @@ void MyRTC_ReadTime(void)
 
 #### UI界面-启动动画
 
-###### startup_animation.h
+###### startup_animation.h（第一版）
 
 ```c
 #ifndef __STARTUP_ANIMATION_H
@@ -1288,7 +1288,7 @@ extern volatile BaseType_t xAnimationCompleted;
 #endif /* __STARTUP_ANIMATION_H */
 ```
 
-###### startup_animation.c
+###### startup_animation.c（第一版）
 
 ```c
 #include "startup_animation.h"
@@ -1394,6 +1394,169 @@ void vAnimation_LoadingBar(void)
     }
     
     vTaskDelay(pdMS_TO_TICKS(500));
+}
+
+//创建开机动画任务
+
+BaseType_t xCreateStartupAnimationTask(UBaseType_t uxPriority)
+{
+    BaseType_t xReturn;
+    TaskHandle_t xHandle = NULL;
+    
+    xReturn = xTaskCreate(
+        vTaskStartupAnimation,      // 任务函数
+        "Animation",                // 任务名称
+        256,                        // 堆栈大小（字）- 根据实际需要调整
+        NULL,                       // 任务参数
+        uxPriority,                 // 优先级
+        &xHandle                    // 任务句柄
+    );
+    
+    return xReturn;
+}
+```
+
+###### startup_animation.h（第二版，较第一版无变化）
+
+```c
+#ifndef __STARTUP_ANIMATION_H
+#define __STARTUP_ANIMATION_H
+
+#include <stdint.h>
+#include "FreeRTOS.h"
+#include "task.h"
+
+//==============================================================================
+// 开机动画函数声明（FreeRTOS版本）
+//==============================================================================
+
+// 动画任务函数
+void vTaskStartupAnimation(void *pvParameters);
+
+// 动画子函数
+void vAnimation_Typewriter(void);
+void vAnimation_LoadingBar(void);
+
+// 创建动画任务（供main调用）
+BaseType_t xCreateStartupAnimationTask(UBaseType_t uxPriority);
+
+// 等待动画完成的标志（可选，用于同步）
+extern volatile BaseType_t xAnimationCompleted;
+
+#endif /* __STARTUP_ANIMATION_H */
+```
+
+
+
+###### startup_animation.c（第二版）
+
+```
+#include "startup_animation.h"
+#include "oled.h"
+#include "oled_fonts.h"
+#include <string.h>
+#include <stdio.h>
+#include "FreeRTOS.h"
+#include "task.h"
+#include "stm32f1xx_hal.h"
+
+// 动画完成标志（可选）
+volatile BaseType_t xAnimationCompleted = pdFALSE;
+
+//开机动画任务函数
+
+void vTaskStartupAnimation(void *pvParameters)
+{
+    // 先显示测试信息，确认任务运行
+    OLED_Clear();
+    OLED_ShowString_Center(24, "Animation Start", 8);
+    OLED_Update();
+    vTaskDelay(pdMS_TO_TICKS(500));
+    
+    // 1. 打字机效果显示 "2G XIAOHEI"
+    vAnimation_Typewriter();
+    
+    // 2. 加载进度条动画
+    vAnimation_LoadingBar();
+    
+    // 设置完成标志
+    xAnimationCompleted = pdTRUE;
+	
+    // 动画完成后删除自己
+    vTaskDelete(NULL);  // 删除自己
+}
+
+//打字机效果显示文字 "2G XIAOHEI"
+
+void vAnimation_Typewriter(void)
+{
+    char *text = "2G XIAOHEI";
+    uint8_t len = strlen(text);
+    uint8_t i;
+    uint8_t startX;
+    uint8_t startY;
+    
+    OLED_Clear();
+    OLED_Update();
+    
+    // 使用8x16字体
+    startX = (128 - (len * 8)) / 2;
+    startY = 24;
+    
+    // 逐个字符显示，实现打字机效果
+    for (i = 0; i < len; i++)
+    {
+        OLED_ShowChar(startX + i * 8, startY, text[i], 8);
+        OLED_Update();
+        vTaskDelay(pdMS_TO_TICKS(200));
+    }
+    
+    vTaskDelay(pdMS_TO_TICKS(500));
+}
+
+//加载进度条动画
+
+void vAnimation_LoadingBar(void)
+{
+    uint8_t progress;
+    char percent[4]={0};
+    uint8_t loadingX, percentX;
+    
+    OLED_Clear();
+    OLED_Update();
+    
+    // 显示"LOADING"文字
+    loadingX = (128 - (7 * 8)) / 2;  // "LOADING"共7个字符
+    OLED_ShowString(loadingX, 16, "LOADING", 8);
+    OLED_Update();
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
+    // 进度条外框
+    OLED_DrawRectangle(24, 36, 80, 10, 0);
+    OLED_Update();
+    vTaskDelay(pdMS_TO_TICKS(100));
+    
+    // 进度条动画
+    for (progress = 0; progress < 100; progress += 1)
+    {
+        // 显示百分比
+				percentX = (128 - (strlen(percent) * 8)) / 2;
+			  if(progress<10){
+				  OLED_ShowNum(percentX, 50, progress, 1, 8);  // 显示数字
+				}else if(progress>=10&&progress<100){
+					OLED_ShowNum(percentX, 50, progress, 2, 8);  // 显示数字
+				}
+				OLED_ShowChar(percentX + 24, 50, '%', 8);    // 显示百分号
+					
+
+        // 绘制进度条
+        if (progress > 0)
+        {
+            OLED_FillArea(26, 38, (76 * progress) / 100, 6, 1);
+        }
+				OLED_Update();
+				vTaskDelay(pdMS_TO_TICKS(10));
+    }
 }
 
 //创建开机动画任务
@@ -1721,7 +1884,7 @@ void vLEDTask(void *pvParameters)
 /* USER CODE END 4 */
 ```
 
-###### 任务间问题
+###### 问题排查-关于Spnrintf
 
 预期现象是播放动画然后显示时钟界面的同时小灯闪烁，但是我发现程序会卡在进度条这个动画，去掉进度条一切符合预期
 
@@ -1752,4 +1915,163 @@ void vAnimation_LoadingBar(void)
 //……
 }
 ```
+
+排查问题，进行逐一测试，测试结果是：单独测试时除了测试5会卡住其余都正常，而联合测试后测试1、2、5的组合可以运行正常（显示LOADING并动态绘制进度条），在这个基础上加入3或者4都会导致程序卡住。
+
+```
+//加载进度条动画
+
+void vAnimation_LoadingBar(void)
+{
+    uint8_t progress;
+    char percent[8];
+    uint8_t loadingX, percentX;
+    
+    OLED_Clear();
+    OLED_Update();
+    
+    // 测试1: 只显示文本
+    loadingX = (128 - (7 * 8)) / 2;
+    OLED_ShowString(loadingX, 16, "LOADING", 8);
+    OLED_Update();
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    
+    // 测试2: 只画矩形框
+    OLED_DrawRectangle(24, 36, 80, 10, 0);
+    OLED_Update();
+    
+    // 测试3: 只显示百分比（固定值，不循环）
+    snprintf(percent, sizeof(percent), "50%%");
+    percentX = (128 - (strlen(percent) * 8)) / 2;
+    OLED_ShowString(percentX, 50, percent, 8);
+    OLED_Update();
+    vTaskDelay(pdMS_TO_TICKS(1000));
+    
+    // 测试4: 循环中显示变化的百分比（关键测试）
+    for (progress = 0; progress <= 100; progress += 5)
+    {
+        snprintf(percent, sizeof(percent), "%d%%", progress);
+        percentX = (128 - (strlen(percent) * 8)) / 2;
+        OLED_ShowString(percentX, 50, percent, 8);
+        OLED_Update();
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    
+    // 测试5: 循环中画进度条（关键测试）
+    for (progress = 0; progress <= 100; progress += 5)
+    {
+        if (progress > 0)
+        {
+            OLED_FillArea(26, 38, (76 * progress) / 100, 6, 1);
+            OLED_Update();
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    
+    vTaskDelay(pdMS_TO_TICKS(500));
+}
+```
+
+所以可以猜测问题出在snprintf这个函数
+
+`snprintf` 是一个相对重量级的函数，会占用大量堆栈空间。第一版代码在 vAnimation_LoadingBar() 中使用 sprintf 函数导致动画任务的堆栈逼近临界状态。
+
+单任务运行时，由于没有任务切换干扰，堆栈尚能维持稳定运行，这是为啥在任务测试2的阶段我没有遇到这个问题；但加入时钟显示任务后，任务调度变得频繁，每次切换都需要额外的堆栈空间保存上下文，这微小的额外开销打破了临界平衡，触发了堆栈溢出，最终导致程序死机。第二版通过改用轻量级的 OLED_ShowNum 函数替代 sprintf ，大幅降低了堆栈需求，为任务切换留出了足够的安全余量，因此能够在多任务环境下稳定运行。
+
+我尝试用OLED驱动库之前封装好的OLED_ShowNum（）+OLED_ShowChar（）来代替之前用snprintf拼接字符串然后用OLED_ShowString显示的方法，发现程序确实能跑通了！
+
+以下是我重新实现百分比显示的代码片段：
+
+完整程序请见startup_animation.c/.h（第二版）
+
+```
+  // 进度条动画
+    for (progress = 0; progress < 100; progress += 1)
+    {
+        // 显示百分比
+				percentX = (128 - (strlen(percent) * 8)) / 2;
+			  if(progress<10){
+				  OLED_ShowNum(percentX, 50, progress, 1, 8);  // 显示数字
+				}else if(progress>=10&&progress<100){
+					OLED_ShowNum(percentX, 50, progress, 2, 8);  // 显示数字
+				}
+				OLED_ShowChar(percentX + 24, 50, '%', 8);    // 显示百分号
+					
+
+        // 绘制进度条
+        if (progress > 0)
+        {
+            OLED_FillArea(26, 38, (76 * progress) / 100, 6, 1);
+        }
+				OLED_Update();
+				vTaskDelay(pdMS_TO_TICKS(10));
+    }
+```
+
+为了验证上面的关于snprint的问题猜想，我回到第一版程序然后打开Debug调试界面，RUN一下，可以看到程序进入了 HardFault
+
+![image-20260228143720833](README.assets/image-20260228143720833.png)
+
+这个时候寄存器的值分别是
+
+![img](https://www.kimi.com/apiv2-files/sign-obj/kimi-fs%2Ffiles%2Fblob%2Fffee9efc69009f042b318ac3ef8b03f7edb448e40c7468354b8c62b51d40f801?filename=image.png&sig=wGZcTCw4gT8nNbx31Ye03QO39NtwasgGFikhtIxdiUM=&t=p)
+
+![img](README.assets/kimi-fs%2Ffiles%2Fblob%2Fa009e7dd863da77278384c3706c853e4d7cbec40de689b60dbe410aa75a1a8defilename=image(1).png&sig=Vb1qH95cTectnnYQCUNwMM0T-GhSUALAtafekM4_NZI=&t=p)
+
+PC的值是故障指令地址，我们在Disassembly窗口查看这个地址对应的指令,窗口右键：
+
+![image-20260228150609351](README.assets/image-20260228150609351.png)
+
+输入PC地址，GO TO
+
+![image-20260228150657112](README.assets/image-20260228150657112.png)
+
+这个无限循环的跳转指令就是我们刚刚在HardFault里面的死循环。
+
+那我们要找的问题是触发HardFault的原因。
+
+还是看上面的寄存器截图，程序卡住时**LR = 0xFFFFFFF1**，这表示：
+
+异常发生时，LR 被设置为特殊的 **EXC_RETURN** 值
+
+0xFFFFFFF1` = 使用 MSP（主堆栈），返回 Handler 模式
+
+**真正的返回地址在堆栈中！**
+
+查看故障发生前的 PC 在 Memory 窗口 查看 MSP 指向的地址： 
+
+ 打开 Memory 1 窗口，输入地址：0x20001BD0（ MSP 值） ，查看内容：
+
+![image-20260228151756303](README.assets/image-20260228151756303.png)
+
+小端模式解析出来
+
+| 地址         | 值           | 寄存器 |
+| ------------ | ------------ | ------ |
+| `0x20001BD0` | `0x200008C4` | R0     |
+| `0x20001BD4` | `0x00000002` | R1     |
+| `0x20001BD8` | `0x00000000` | R2     |
+| `0x20001BDC` | `0x00000000` | R3     |
+| `0x20001BE0` | `0x00000000` | R12    |
+| `0x20001BE4` | `0x0000005D` | **LR** |
+| `0x20001BE8` | `0xD208003A` | **PC** |
+| `0x20001BEC` | `0x0F08003B` | xPSR   |
+
+这里PC指向的0xD208003A 是一个 无效的 Flash 地址（STM32F1 的 Flash 最大 0x0807FFFF）。 这个地址看起来像是 栈上的随机数据被当作返回地址。
+
+LR（链接寄存器）= 0x0000005D，这通常是 Thumb 模式的函数地址，但正常函数地址应该是 0x0800xxxx,这个0x0000005D 在 STM32F1 中通常是 未映射区域（保留/未使用）
+
+所以我们大概可以确定问题是：
+
+```
+sprintf 执行时：
+  1. 使用了大量栈空间（>100字节）
+  2. 覆盖了保存的 LR 和 PC
+  3. 函数返回时跳转到 0xD208003A（无效地址）
+  4. 触发 HardFault
+```
+
+这个问题最暴力的解决方法就是给任务分配更多栈空间，但是本来C6T6的空间就很紧张了，我尝试多分配一点给动画任务空间结果直接分配失败了，而且就算成功这个空间的开销是非常不合算的。
+
+综上还是采用了startup_animation.c（第二版）的方案。
 

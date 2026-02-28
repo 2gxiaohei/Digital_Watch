@@ -89,6 +89,5 @@ NVIC value of 255. */
 //其他添加的宏
 #define configSUPPORT_DYNAMIC_ALLOCATION    1  // 支持动态内存分配
 
-
 #endif /* FREERTOS_CONFIG_H */
 

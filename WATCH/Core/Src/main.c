@@ -93,8 +93,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
  // 初始化OLED
     OLED_Init();
-    OLED_Clear();
-    
+    OLED_Clear();	
     // 创建开机动画任务
     if (xCreateStartupAnimationTask(2) != pdPASS) 
     {
@@ -191,6 +190,7 @@ void vLEDTask(void *pvParameters)
         vTaskDelay(pdMS_TO_TICKS(500));
     }
 }
+
 
 /* USER CODE END 4 */
 

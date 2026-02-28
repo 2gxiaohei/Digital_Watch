@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include "FreeRTOS.h"
 #include "task.h"
+#include "stm32f1xx_hal.h"
 
 // 动画完成标志（可选）
 volatile BaseType_t xAnimationCompleted = pdFALSE;
@@ -23,13 +24,13 @@ void vTaskStartupAnimation(void *pvParameters)
     vAnimation_Typewriter();
     
     // 2. 加载进度条动画
-    //vAnimation_LoadingBar();
+    vAnimation_LoadingBar();
     
     // 设置完成标志
     xAnimationCompleted = pdTRUE;
-    
+	
     // 动画完成后删除自己
-    vTaskDelete(NULL); 
+    vTaskDelete(NULL);  // 删除自己
 }
 
 //打字机效果显示文字 "2G XIAOHEI"
@@ -65,7 +66,7 @@ void vAnimation_Typewriter(void)
 void vAnimation_LoadingBar(void)
 {
     uint8_t progress;
-    char percent[4];
+    char percent[4]={0};
     uint8_t loadingX, percentX;
     
     OLED_Clear();
@@ -83,24 +84,26 @@ void vAnimation_LoadingBar(void)
     vTaskDelay(pdMS_TO_TICKS(100));
     
     // 进度条动画
-    for (progress = 0; progress <= 100; progress += 5)
+    for (progress = 0; progress < 100; progress += 1)
     {
         // 显示百分比
-        sprintf(percent, "%d%%", progress);
-        percentX = (128 - (strlen(percent) * 8)) / 2;
-        OLED_ShowString(percentX, 50, percent, 8);
-        
-        // 绘制进度
+				percentX = (128 - (strlen(percent) * 8)) / 2;
+			  if(progress<10){
+				  OLED_ShowNum(percentX, 50, progress, 1, 8);  // 显示数字
+				}else if(progress>=10&&progress<100){
+					OLED_ShowNum(percentX, 50, progress, 2, 8);  // 显示数字
+				}
+				OLED_ShowChar(percentX + 24, 50, '%', 8);    // 显示百分号
+					
+
+        // 绘制进度条
         if (progress > 0)
         {
             OLED_FillArea(26, 38, (76 * progress) / 100, 6, 1);
         }
-        
-        OLED_Update();
-        vTaskDelay(pdMS_TO_TICKS(100));
+				OLED_Update();
+				vTaskDelay(pdMS_TO_TICKS(10));
     }
-    
-    vTaskDelay(pdMS_TO_TICKS(500));
 }
 
 //创建开机动画任务
